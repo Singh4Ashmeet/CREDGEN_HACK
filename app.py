@@ -23,7 +23,7 @@ load_dotenv()
 
 # --- 1. Initialization ---
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Basic config and paths (for admin system)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
