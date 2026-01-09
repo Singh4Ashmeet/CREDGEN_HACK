@@ -1,7 +1,7 @@
 import os
 import logging
 import json
-import google.generativeai as genai
+import google.genai as genai
 from typing import Dict, List, Optional, Any
 
 # Set up logging
