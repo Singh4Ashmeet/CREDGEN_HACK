@@ -25,3 +25,6 @@ rapidfuzz==3.8.3
 # === SETUP ===
 setuptools==75.1.0
 wheel==0.43.0
+
+# Database dependencies (for enhanced features)
+cryptography  # For password encryption
