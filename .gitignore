@@ -1,1 +1,5 @@
-
+# Database files
+data/credentials.db
+data/.key
+*.db
+*.db-journal
