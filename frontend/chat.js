@@ -4,7 +4,12 @@
 (function () {
     'use strict';
 
-    const API_BASE = window.location.origin || '';
+    // ============================================
+    // CONFIGURATION - UPDATE THESE FOR YOUR SETUP
+    // ============================================
+    const API_BASE = 'http://localhost:5000'; // Change to your backend URL
+    const API_KEY = 'credgen'; // From your .env APP_SECRET_KEY
+    // ============================================
 
     // Session handling
     function getOrCreateSession() {
@@ -79,16 +84,16 @@
         const totalSize = files.reduce((s, f) => s + f.size, 0);
         const fileList = files.map(file => `
             <div class="file-list-item">
-                <div class="file-list-icon">${window.getFileIcon(window.getFileType(file.type))}</div>
+                <div class="file-list-icon">${window.getFileIcon ? window.getFileIcon(window.getFileType(file.type)) : '📄'}</div>
                 <div class="file-list-name">${file.name}</div>
-                <div class="file-list-size">${window.formatBytes(file.size)}</div>
+                <div class="file-list-size">${window.formatBytes ? window.formatBytes(file.size) : Math.round(file.size / 1024) + ' KB'}</div>
             </div>
         `).join('');
 
         return `
             <div class="file-message-header">
                 <i class="fas fa-paperclip"></i>
-                <span>${files.length} file(s) attached (${window.formatBytes(totalSize)})</span>
+                <span>${files.length} file(s) attached (${window.formatBytes ? window.formatBytes(totalSize) : Math.round(totalSize / 1024) + ' KB'})</span>
             </div>
             <div class="file-list">${fileList}</div>
         `;
@@ -139,20 +144,29 @@
         }
     }
 
-    // API wrappers
+    // API wrappers - UPDATED WITH AUTHENTICATION
     async function apiCall(path, body = {}) {
         const res = await fetch(`${API_BASE}${path}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'X-Session-ID': SESSION_ID
+                'X-Session-ID': SESSION_ID,
+                'X-API-Key': API_KEY,  // Added authentication
+                'Authorization': `Bearer ${API_KEY}`  // Alternative auth header
             },
             body: JSON.stringify(body)
         });
 
         const data = await res.json().catch(() => ({}));
 
-        if (!res.ok) throw new Error(data.message || 'Request failed');
+        if (!res.ok) {
+            if (res.status === 401) {
+                throw new Error('Authentication failed. Please check API key.');
+            } else if (res.status === 403) {
+                throw new Error('Access denied. Invalid credentials.');
+            }
+            throw new Error(data.message || `Request failed (${res.status})`);
+        }
 
         // sync session
         if (res.headers.get('X-Session-ID')) {
@@ -171,12 +185,20 @@
 
         const res = await fetch(`${API_BASE}/chat`, {
             method: 'POST',
-            headers: { 'X-Session-ID': SESSION_ID },
+            headers: { 
+                'X-Session-ID': SESSION_ID,
+                'X-API-Key': API_KEY  // Added authentication
+            },
             body: formData
         });
 
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.message || 'Upload failed');
+        if (!res.ok) {
+            if (res.status === 401) {
+                throw new Error('Authentication failed. Please check API key.');
+            }
+            throw new Error(data.message || `Upload failed (${res.status})`);
+        }
 
         if (res.headers.get('X-Session-ID')) {
             SESSION_ID = res.headers.get('X-Session-ID');
@@ -261,11 +283,34 @@
 
         } catch (err) {
             hideTypingIndicator(); // Ensure removal on error
+            console.error('Chat API Error:', err);
             appendMessage(`Error: ${err.message}`, 'bot');
         } finally {
             setSending(false);
             // Double check removal just in case
             hideTypingIndicator();
+        }
+    }
+
+    // Test backend connection on init
+    async function testBackendConnection() {
+        try {
+            const testRes = await fetch(`${API_BASE}/health`, {
+                method: 'GET',
+                headers: {
+                    'X-API-Key': API_KEY
+                }
+            });
+            
+            if (testRes.ok) {
+                console.log('✅ Backend connection successful');
+            } else {
+                console.warn('⚠️ Backend connection test failed:', testRes.status);
+                appendMessage('Warning: Backend connection issue detected.', 'bot');
+            }
+        } catch (error) {
+            console.error('❌ Backend connection error:', error);
+            appendMessage('Error: Cannot connect to backend server.', 'bot');
         }
     }
 
@@ -284,11 +329,13 @@
             const text = ui.input.value.trim();
             ui.input.value = '';
 
-            const files = window.getAttachedFiles();
+            const files = window.getAttachedFiles ? window.getAttachedFiles() : [];
 
             await sendMessage(text, files);
 
-            if (files.length > 0) window.clearAttachments();
+            if (files.length > 0 && window.clearAttachments) {
+                window.clearAttachments();
+            }
         });
 
         ui.input.addEventListener('keydown', e => {
@@ -297,6 +344,9 @@
                 ui.form.dispatchEvent(new Event('submit'));
             }
         });
+
+        // Test backend connection
+        testBackendConnection();
 
         // Initial greeting
         setTimeout(() => {
