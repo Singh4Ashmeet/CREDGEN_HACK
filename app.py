@@ -1306,11 +1306,15 @@ def load_json_filter(s):
     except Exception:
         return []
 
+
 if __name__ == '__main__':
+    # Get port from Render's environment variable, default to 5000 for local development
+    port = int(os.environ.get('PORT', 5000))
+    
     print("=" * 60)
     print("CREDGEN Loan Application System")
     print("=" * 60)
-    print(f"Server starting on http://0.0.0.0:5000")
+    print(f"Server starting on http://0.0.0.0:{port}")  # Use the port variable here
     print(f"LLM Provider: {llm_provider}")
     print(f"LLM Mode: {os.getenv('LLM_MODE', 'enabled')}")
     print("Available endpoints:")
@@ -1324,4 +1328,5 @@ if __name__ == '__main__':
     print("  GET  /health               - Health check")
     print("=" * 60)
     
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # Use the port variable here instead of hardcoded 5000
+    app.run(host='0.0.0.0', port=port, debug=False)  # Set debug=False for production
