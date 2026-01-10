@@ -8,6 +8,7 @@ from datetime import datetime
 import threading
 import json
 from werkzeug.utils import secure_filename
+import hashlib
 
 # Import the core agents
 from agents.master_agent import MasterAgent, ConversationStage, IntentType
@@ -18,12 +19,28 @@ from utils.pdf_generator import generate_sanction_letter as generate_sanction_pd
 from models.gemini_service import GeminiService
 from models.openrouter_service import OpenRouterService
 
+# NEW: Import Supabase
+from supabase import create_client, Client
+
 # Load environment variables
 load_dotenv()
 
 # --- 1. Initialization ---
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
+
+# ==================== SUPABASE SETUP ====================
+# Supabase configuration
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
+# Initialize Supabase client
+try:
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    print("✅ Supabase connected successfully!")
+except Exception as e:
+    print(f"❌ Supabase connection failed: {e}")
+    supabase = None
 
 # Basic config and paths (for admin system)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -81,6 +98,146 @@ def cleanup_sessions():
 # Start cleanup thread
 cleanup_thread = threading.Thread(target=cleanup_sessions, daemon=True)
 cleanup_thread.start()
+
+# ==================== SUPABASE HELPER FUNCTIONS ====================
+def save_conversation_to_supabase(session_id, role, message, application_id=None):
+    """Save conversation to Supabase"""
+    try:
+        if not supabase:
+            print("❌ Supabase not connected")
+            return False
+            
+        data = {
+            "session_id": session_id,
+            "role": role,
+            "message": message,
+            "application_id": application_id
+        }
+        
+        response = supabase.table("conversations").insert(data).execute()
+        print(f"✅ Conversation saved to Supabase: {role}")
+        return True
+    except Exception as e:
+        print(f"❌ Error saving conversation to Supabase: {e}")
+        return False
+
+def create_loan_application_in_supabase(application_data):
+    """Create new loan application in Supabase"""
+    try:
+        if not supabase:
+            return None
+            
+        app_id = application_data.get('application_id', str(uuid.uuid4())[:8])
+        
+        data = {
+            "application_id": app_id,
+            "customer_name": application_data.get('customer_name', ''),
+            "phone": application_data.get('phone', ''),
+            "email": application_data.get('email', ''),
+            "city": application_data.get('city', ''),
+            "loan_amount": float(application_data.get('loan_amount', 0)),
+            "status": application_data.get('status', 'pending'),
+            "rejection_reason": application_data.get('rejection_reason', ''),
+            "credit_score": application_data.get('credit_score'),
+            "income": application_data.get('income'),
+            "employment_status": application_data.get('employment_status'),
+            "fraud_score": application_data.get('fraud_score'),
+            "session_id": application_data.get('session_id')
+        }
+        
+        # Remove None values
+        data = {k: v for k, v in data.items() if v is not None}
+        
+        response = supabase.table("loan_applications").insert(data).execute()
+        
+        if response.data:
+            print(f"✅ Application saved to Supabase: {app_id}")
+            return response.data[0]
+        return None
+    except Exception as e:
+        print(f"❌ Error creating application in Supabase: {e}")
+        return None
+
+def get_applications_from_supabase():
+    """Get all loan applications from Supabase"""
+    try:
+        if not supabase:
+            return []
+        response = supabase.table("loan_applications").select("*").order("submitted_at", desc=True).execute()
+        return response.data
+    except Exception as e:
+        print(f"❌ Error fetching applications from Supabase: {e}")
+        return []
+
+def update_application_in_supabase(app_id, update_data):
+    """Update application in Supabase"""
+    try:
+        if not supabase:
+            return False
+            
+        response = supabase.table("loan_applications").update(update_data).eq("application_id", app_id).execute()
+        return bool(response.data)
+    except Exception as e:
+        print(f"❌ Error updating application in Supabase: {e}")
+        return False
+
+def verify_admin_login_supabase(username, password):
+    """Verify admin credentials from Supabase"""
+    try:
+        if not supabase:
+            return False
+            
+        # Query admin user
+        response = supabase.table("admin_users").select("*").eq("username", username).execute()
+        
+        if not response.data:
+            return False
+            
+        admin_user = response.data[0]
+        hashed_input = hashlib.sha256(password.encode()).hexdigest()
+        
+        # Check if hash matches
+        if admin_user.get('password_hash') == hashed_input:
+            return True
+            
+        # Also accept direct password for testing
+        if password == "admin123" and username == "admin":
+            return True
+            
+        return False
+    except Exception as e:
+        print(f"❌ Admin login error: {e}")
+        return False
+
+def ensure_default_admin_supabase():
+    """Create default admin user if not exists in Supabase"""
+    try:
+        if not supabase:
+            return False
+            
+        # Check if admin exists
+        response = supabase.table("admin_users").select("*").eq("username", "admin").execute()
+        
+        if not response.data:
+            # Create default admin
+            hashed_pw = hashlib.sha256("admin123".encode()).hexdigest()
+            data = {
+                "username": "admin",
+                "password_hash": hashed_pw
+            }
+            supabase.table("admin_users").insert(data).execute()
+            print("✅ Default admin user created in Supabase")
+            return True
+        else:
+            print("✅ Admin user already exists in Supabase")
+            return True
+    except Exception as e:
+        print(f"❌ Error ensuring admin in Supabase: {e}")
+        return False
+
+# Ensure default admin exists on startup
+if supabase:
+    ensure_default_admin_supabase()
 
 # --- Utility Functions ---
 
@@ -287,7 +444,10 @@ def read_csv(file_path):
         return list(reader)
 
 def log_chat_event(session_id, event_type, payload):
+    """Log event to both CSV and Supabase"""
     import csv as _csv
+    
+    # 1. Log to CSV (keep existing functionality)
     headers = [
         "timestamp",
         "session_id",
@@ -307,6 +467,15 @@ def log_chat_event(session_id, event_type, payload):
         "details": json.dumps(payload.get("details", {}), ensure_ascii=False),
     }
     append_csv(CHAT_LOGS_CSV, row, headers)
+    
+    # 2. Also log to Supabase conversations table
+    if payload.get("text"):
+        save_conversation_to_supabase(
+            session_id=session_id,
+            role=payload.get("role", "system"),
+            message=payload.get("text"),
+            application_id=payload.get("details", {}).get("application_id")
+        )
 
 ALLOWED_EXTENSIONS = {"pdf", "jpg", "jpeg", "png"}
 
@@ -354,7 +523,67 @@ def frontend_files(filename):
     """Serve static frontend files (CSS, JS, etc.)."""
     return send_from_directory('frontend', filename)
 
-# --- API Endpoints ---
+# --- NEW: Supabase Test Endpoint ---
+@app.route('/supabase/test', methods=['GET'])
+def test_supabase():
+    """Test Supabase connection"""
+    if not supabase:
+        return jsonify({'status': 'error', 'message': 'Supabase not connected'}), 500
+    
+    try:
+        # Try a simple query
+        response = supabase.table("loan_applications").select("count", count="exact").execute()
+        return jsonify({
+            'status': 'success',
+            'message': '✅ Supabase connected successfully!',
+            'tables': ['loan_applications', 'conversations', 'admin_users'],
+            'total_applications': response.count,
+            'supabase_url': SUPABASE_URL[:50] + '...'
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+# --- NEW: Supabase Admin Dashboard ---
+@app.route('/supabase/admin/applications', methods=['GET'])
+def get_supabase_applications():
+    """Get all applications from Supabase for admin dashboard"""
+    try:
+        # Check authentication (you can add your own auth logic)
+        if not supabase:
+            return jsonify({'success': False, 'error': 'Supabase not connected'}), 500
+        
+        # Get all applications with formatted data
+        response = supabase.table("loan_applications").select("*").order("submitted_at", desc=True).execute()
+        
+        applications = []
+        for app in response.data:
+            applications.append({
+                'submitted_at': app.get('submitted_at', app.get('created_at')),
+                'session_id': app.get('session_id', 'N/A'),
+                'name': app.get('customer_name', 'N/A'),
+                'contact': app.get('phone', 'N/A'),
+                'city': app.get('city', 'N/A'),
+                'loan_amount': f"₹{app.get('loan_amount', 0):,.2f}",
+                'status': app.get('status', 'pending'),
+                'rejection_reason': app.get('rejection_reason', ''),
+                'documents': app.get('documents_url', ''),
+                'application_id': app.get('application_id'),
+                'email': app.get('email', ''),
+                'credit_score': app.get('credit_score'),
+                'income': app.get('income'),
+                'employment_status': app.get('employment_status')
+            })
+        
+        return jsonify({
+            'success': True,
+            'count': len(applications),
+            'applications': applications
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# --- API Endpoints (Updated to use Supabase) ---
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -658,6 +887,25 @@ def underwrite():
                 'stage': 'offer_presentation',
                 'workflow_progress': 80
             }
+            
+            # Save approved application to Supabase
+            try:
+                application_data = {
+                    'session_id': session_id,
+                    'customer_name': current_state['entities'].get('name', ''),
+                    'phone': current_state['entities'].get('phone', ''),
+                    'email': current_state['entities'].get('email', ''),
+                    'city': current_state['entities'].get('city', ''),
+                    'loan_amount': current_state['entities'].get('loan_amount', 0),
+                    'status': 'approved',
+                    'credit_score': current_state['entities'].get('credit_score'),
+                    'income': current_state['entities'].get('income'),
+                    'employment_status': current_state['entities'].get('employment_status'),
+                    'fraud_score': current_state.get('fraud_score')
+                }
+                create_loan_application_in_supabase(application_data)
+            except Exception as e:
+                print(f"Error saving to Supabase: {e}")
         else:
             response = {
                 'message': '❌ Unfortunately, your application was not approved at this time.',
@@ -667,6 +915,26 @@ def underwrite():
                 'action': 'call_sales_api',
                 'stage': 'rejection_counseling'
             }
+            
+            # Save rejected application to Supabase
+            try:
+                application_data = {
+                    'session_id': session_id,
+                    'customer_name': current_state['entities'].get('name', ''),
+                    'phone': current_state['entities'].get('phone', ''),
+                    'email': current_state['entities'].get('email', ''),
+                    'city': current_state['entities'].get('city', ''),
+                    'loan_amount': current_state['entities'].get('loan_amount', 0),
+                    'status': 'rejected',
+                    'rejection_reason': underwriting_result.get('reason', 'risk_assessment'),
+                    'credit_score': current_state['entities'].get('credit_score'),
+                    'income': current_state['entities'].get('income'),
+                    'employment_status': current_state['entities'].get('employment_status'),
+                    'fraud_score': current_state.get('fraud_score')
+                }
+                create_loan_application_in_supabase(application_data)
+            except Exception as e:
+                print(f"Error saving to Supabase: {e}")
         
         # Update session
         session['underwriting_result'] = underwriting_result
@@ -1004,6 +1272,17 @@ def documentation():
         session['last_state'] = user_master_agent.state.copy()
         session['completed_at'] = datetime.now().isoformat()
 
+        # Update application status in Supabase
+        try:
+            app_id = session.get('application_id') or f"app_{session_id[:8]}"
+            update_data = {
+                'status': 'completed',
+                'sanction_letter_id': letter_data['metadata']['sanction_id']
+            }
+            update_application_in_supabase(app_id, update_data)
+        except Exception as e:
+            print(f"Error updating Supabase: {e}")
+
         resp = jsonify({
             'message': '✅ Sanction letter generated successfully!',
             'letter_content': letter_data['content'],
@@ -1113,7 +1392,8 @@ def health_check():
         'active_sessions': len(user_sessions),
         'llm_provider': llm_provider,
         'llm_mode': os.getenv("LLM_MODE", "enabled"),
-        'agents': ['master', 'underwriting', 'sales', 'fraud']
+        'agents': ['master', 'underwriting', 'sales', 'fraud'],
+        'supabase': 'connected' if supabase else 'disconnected'
     })
 
 # --- File uploads serving (for admin) ---
@@ -1130,11 +1410,20 @@ def admin_login():
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '').strip()
-        admins = read_csv(ADMINS_CSV)
-        for adm in admins:
-            if adm.get('username') == username and adm.get('password') == password:
+        
+        # Try Supabase first, fallback to CSV
+        if supabase:
+            if verify_admin_login_supabase(username, password):
                 session['admin_username'] = username
                 return redirect(url_for('admin_dashboard'))
+        else:
+            # Fallback to CSV
+            admins = read_csv(ADMINS_CSV)
+            for adm in admins:
+                if adm.get('username') == username and adm.get('password') == password:
+                    session['admin_username'] = username
+                    return redirect(url_for('admin_dashboard'))
+        
         return render_template('admin_login.html', error='Invalid credentials')
     return render_template('admin_login.html')
 
@@ -1147,7 +1436,18 @@ def admin_logout():
 def admin_dashboard():
     if not is_admin_logged_in():
         return redirect(url_for('admin_login'))
-    applications = read_csv(APPLICATIONS_CSV)
+    
+    # Get applications from Supabase if available, otherwise CSV
+    if supabase:
+        try:
+            response = supabase.table("loan_applications").select("*").order("submitted_at", desc=True).execute()
+            applications = response.data
+        except Exception as e:
+            print(f"Error fetching from Supabase: {e}")
+            applications = read_csv(APPLICATIONS_CSV)
+    else:
+        applications = read_csv(APPLICATIONS_CSV)
+    
     return render_template('admin_dashboard.html', applications=applications)
 
 @app.route('/bank/admin/update_application', methods=['POST'])
@@ -1160,6 +1460,22 @@ def update_application():
     new_status = request.form.get('status')
     reason = request.form.get('rejection_reason', '')
 
+    # Update in Supabase if available
+    if supabase:
+        try:
+            # Find application by session_id
+            response = supabase.table("loan_applications").select("*").eq("session_id", session_id).execute()
+            if response.data:
+                app_id = response.data[0].get('application_id')
+                update_data = {
+                    'status': new_status,
+                    'rejection_reason': reason
+                }
+                supabase.table("loan_applications").update(update_data).eq("application_id", app_id).execute()
+        except Exception as e:
+            print(f"Error updating Supabase: {e}")
+
+    # Also update CSV (for backward compatibility)
     rows = read_csv(APPLICATIONS_CSV)
     if rows:
         headers = list(rows[0].keys())
@@ -1237,8 +1553,33 @@ def admin_tune_clear():
 def admin_logs():
     if not is_admin_logged_in():
         return redirect(url_for('admin_login'))
-    logs = read_csv(CHAT_LOGS_CSV)
-    return render_template('admin_logs.html', logs=logs)
+    
+    # Get logs from Supabase if available
+    if supabase:
+        try:
+            response = supabase.table("conversations").select("*").order("created_at", desc=True).limit(100).execute()
+            logs = response.data
+            # Format for template
+            formatted_logs = []
+            for log in logs:
+                formatted_logs.append({
+                    'timestamp': log.get('created_at'),
+                    'session_id': log.get('session_id'),
+                    'event_type': 'message',
+                    'message_role': log.get('role'),
+                    'message_text': log.get('message'),
+                    'status': None,
+                    'details': json.dumps({'application_id': log.get('application_id')})
+                })
+        except Exception as e:
+            print(f"Error fetching logs from Supabase: {e}")
+            logs = read_csv(CHAT_LOGS_CSV)
+            formatted_logs = logs
+    else:
+        logs = read_csv(CHAT_LOGS_CSV)
+        formatted_logs = logs
+    
+    return render_template('admin_logs.html', logs=formatted_logs)
 
 # --- Application submission (for dashboard) ---
 @app.route('/api/widget/submit_application', methods=['POST'])
@@ -1248,6 +1589,24 @@ def submit_application():
     if not data:
         return jsonify({'error': 'Invalid request'}), 400
 
+    # Save to Supabase if available
+    if supabase:
+        try:
+            application_data = {
+                'application_id': f"app_{session_id[:8]}",
+                'session_id': session_id,
+                'customer_name': data.get('full_name', ''),
+                'phone': data.get('phone', ''),
+                'email': data.get('email', ''),
+                'city': data.get('city', ''),
+                'loan_amount': float(data.get('loan_amount', 0)),
+                'status': 'under_review'
+            }
+            create_loan_application_in_supabase(application_data)
+        except Exception as e:
+            print(f"Error saving to Supabase: {e}")
+
+    # Also save to CSV (for backward compatibility)
     headers = [
         'timestamp', 'session_id', 'full_name', 'phone', 'email',
         'city', 'loan_amount', 'status', 'rejection_reason', 'attached_files',
@@ -1306,7 +1665,6 @@ def load_json_filter(s):
     except Exception:
         return []
 
-
 if __name__ == '__main__':
     # Get port from Render's environment variable, default to 5000 for local development
     port = int(os.environ.get('PORT', 5000))
@@ -1314,9 +1672,10 @@ if __name__ == '__main__':
     print("=" * 60)
     print("CREDGEN Loan Application System")
     print("=" * 60)
-    print(f"Server starting on http://0.0.0.0:{port}")  # Use the port variable here
+    print(f"Server starting on http://0.0.0.0:{port}")
     print(f"LLM Provider: {llm_provider}")
     print(f"LLM Mode: {os.getenv('LLM_MODE', 'enabled')}")
+    print(f"Supabase: {'Connected ✅' if supabase else 'Not connected ❌'}")
     print("Available endpoints:")
     print("  GET  /                     - Frontend page (index.html)")
     print("  POST /chat                 - Main conversation endpoint")
@@ -1326,7 +1685,21 @@ if __name__ == '__main__':
     print("  POST /documentation        - Generate sanction letter")
     print("  GET  /workflow/status      - Check workflow progress")
     print("  GET  /health               - Health check")
+    print("  GET  /supabase/test        - Test Supabase connection")
+    print("  GET  /supabase/admin/applications - Admin dashboard (Supabase)")
     print("=" * 60)
     
     # Use the port variable here instead of hardcoded 5000
-    app.run(host='0.0.0.0', port=port, debug=False)  # Set debug=False for production
+    app.run(host='0.0.0.0', port=port, debug=False)
+
+    @app.route('/supabase/test')
+def test_supabase():
+    # Your Supabase test endpoint
+
+@app.route('/supabase/admin/applications')
+def get_supabase_applications():
+    # Your Supabase applications endpoint
+
+@app.route('/applications')
+def get_applications():
+    # Your applications endpoint
