@@ -6,6 +6,8 @@
     <title>CREDGEN AI – Loan Assistant Chatbot</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Supabase Client -->
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Inter', sans-serif; background: #0a0a0a; color: #e5e7eb; line-height: 1.6; }
@@ -16,8 +18,25 @@
         .header-content { display: flex; justify-content: space-between; align-items: center; }
         .logo { display: flex; align-items: center; gap: 10px; font-size: 24px; font-weight: 600; color: #fff; text-decoration: none; }
         .logo i { color: #4f46e5; }
-        .demo-btn { background: #4f46e5; color: white; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: 500; }
-        .demo-btn:hover { background: #4338ca; }
+        .demo-btn { background: #4f46e5; color: white; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: 500; transition: all 0.3s; display: inline-flex; align-items: center; gap: 8px; }
+        .demo-btn:hover { background: #4338ca; transform: translateY(-2px); }
+        .supabase-btn { background: #3ecf8e; color: white; }
+        .supabase-btn:hover { background: #2dbd7d; }
+        .danger-btn { background: #ef4444; }
+        .danger-btn:hover { background: #dc2626; }
+        .warning-btn { background: #f59e0b; }
+        .warning-btn:hover { background: #d97706; }
+        
+        /* Admin Panel */
+        .admin-panel { background: #1f2937; border-radius: 10px; padding: 25px; margin: 30px 0; border: 1px solid #374151; }
+        .admin-panel h3 { color: #3ecf8e; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+        .admin-panel h3 i { color: #3ecf8e; }
+        .admin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-top: 20px; }
+        .admin-card { background: #111827; padding: 20px; border-radius: 8px; border: 1px solid #374151; transition: all 0.3s; }
+        .admin-card:hover { border-color: #3ecf8e; transform: translateY(-3px); }
+        .admin-card h4 { color: #fff; margin-bottom: 10px; display: flex; align-items: center; gap: 10px; }
+        .admin-card p { color: #9ca3af; font-size: 14px; margin-bottom: 15px; }
+        .admin-card .btn-group { display: flex; gap: 10px; flex-wrap: wrap; }
         
         /* Hero */
         .hero { padding: 80px 0; text-align: center; border-bottom: 1px solid #222; }
@@ -53,16 +72,63 @@
         .footer-links a:hover { color: #fff; }
         .copyright { color: #6b7280; font-size: 14px; }
         
+        /* Status Indicators */
+        .status-badge { display: inline-flex; align-items: center; padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; margin-left: 10px; }
+        .status-online { background: #10b9811a; color: #10b981; border: 1px solid #10b98133; }
+        .status-offline { background: #ef44441a; color: #ef4444; border: 1px solid #ef444433; }
+        
+        /* Loading Spinner */
+        .spinner {
+            border: 3px solid #374151;
+            border-top: 3px solid #3ecf8e;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Toast Notification */
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #10b981;
+            color: white;
+            padding: 15px 25px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 1000;
+            transform: translateX(150%);
+            transition: transform 0.3s ease;
+        }
+        .toast.show {
+            transform: translateX(0);
+        }
+        .toast.error {
+            background: #ef4444;
+        }
+        
         /* Responsive */
         @media (max-width: 768px) {
             .hero h1 { font-size: 36px; }
             h2 { font-size: 28px; }
             .header-content { flex-direction: column; gap: 15px; }
-            .cta-buttons { flex-direction: column; align-items: center; }
+            .cta-buttons, .admin-grid { flex-direction: column; }
+            .btn-group { flex-direction: column; }
+            .demo-btn { width: 100%; justify-content: center; }
         }
     </style>
 </head>
 <body>
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
+
     <!-- Header -->
     <header>
         <div class="container header-content">
@@ -70,12 +136,15 @@
                 <i class="fas fa-robot"></i>
                 CREDGEN AI
             </a>
-            <div style="display:flex; gap:10px; align-items:center;">
+            <div style="display:flex; gap:10px; align-items:center; flex-wrap: wrap;">
                 <a href="/widget.html" class="demo-btn" target="_blank" rel="noopener noreferrer">
                     <i class="fas fa-comments"></i> Live Demo
                 </a>
-                <a href="/bank/admin/login" class="demo-btn" target="_blank" rel="noopener noreferrer" style="background:#333; border:1px solid #444;">
+                <a href="#" class="demo-btn warning-btn" onclick="showToast('Admin panel requires authentication', 'warning')">
                     <i class="fas fa-user-shield"></i> Admin Login
+                </a>
+                <a href="https://supabase.com/dashboard/project/keyzhoellnmxyegtsoft" class="demo-btn supabase-btn" target="_blank">
+                    <i class="fas fa-database"></i> Supabase Dashboard
                 </a>
             </div>
         </div>
@@ -86,15 +155,134 @@
         <div class="container">
             <h1>AI Loan Assistant Chatbot</h1>
             <p>An intelligent chatbot that handles loan applications, document processing, fraud detection, and instant underwriting decisions for financial websites.</p>
-            <a href="/widget.html" class="demo-btn" target="_blank" rel="noopener noreferrer">
-                <i class="fas fa-play-circle"></i> Watch Demo
-            </a>
+            <div style="display: flex; gap: 10px; justify-content: center; margin-top: 20px;">
+                <span class="status-badge status-online" id="dbStatus">
+                    <i class="fas fa-circle" style="font-size: 8px; margin-right: 5px;"></i>
+                    Testing Supabase Connection...
+                </span>
+                <span class="status-badge status-online" id="dataStatus">
+                    <i class="fas fa-circle" style="font-size: 8px; margin-right: 5px;"></i>
+                    Loading Data...
+                </span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Supabase Admin Panel -->
+    <section class="container">
+        <div class="admin-panel">
+            <h3><i class="fas fa-database"></i> Supabase Admin Dashboard</h3>
+            <p style="color: #9ca3af; margin-bottom: 20px;">Manage your loan applications with real-time database powered by Supabase. All data is securely stored in the cloud.</p>
+            
+            <div class="admin-grid">
+                <div class="admin-card">
+                    <h4><i class="fas fa-list-check"></i> Applications Dashboard</h4>
+                    <p>View, filter, and manage all loan applications in real-time with advanced search and filtering options.</p>
+                    <div class="btn-group">
+                        <button class="demo-btn supabase-btn" onclick="fetchApplications()">
+                            <i class="fas fa-sync-alt"></i> Load Applications
+                        </button>
+                        <a href="https://supabase.com/dashboard/project/keyzhoellnmxyegtsoft" class="demo-btn" target="_blank">
+                            <i class="fas fa-eye"></i> View in Supabase
+                        </a>
+                    </div>
+                </div>
+                
+                <div class="admin-card">
+                    <h4><i class="fas fa-shield-alt"></i> Database Management</h4>
+                    <p>Check database health, view table statistics, and manage Supabase connections.</p>
+                    <div class="btn-group">
+                        <button class="demo-btn" onclick="testSupabaseConnection()">
+                            <i class="fas fa-heartbeat"></i> Test Connection
+                        </button>
+                        <button class="demo-btn warning-btn" onclick="createSampleData()">
+                            <i class="fas fa-plus-circle"></i> Add Sample Data
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="admin-card">
+                    <h4><i class="fas fa-chart-line"></i> Analytics & Reports</h4>
+                    <p>View application statistics, conversion rates, and performance metrics.</p>
+                    <div class="btn-group">
+                        <button class="demo-btn" onclick="showAnalytics()">
+                            <i class="fas fa-chart-bar"></i> View Analytics
+                        </button>
+                        <button class="demo-btn" onclick="exportData()">
+                            <i class="fas fa-download"></i> Export Data
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="admin-card">
+                    <h4><i class="fas fa-cogs"></i> Admin Tools</h4>
+                    <p>Access advanced admin features for managing users and system configurations.</p>
+                    <div class="btn-group">
+                        <button class="demo-btn warning-btn" onclick="showToast('Advanced admin features coming soon!', 'warning')">
+                            <i class="fas fa-sign-in-alt"></i> Admin Settings
+                        </button>
+                        <button class="demo-btn" onclick="clearLocalData()">
+                            <i class="fas fa-trash"></i> Clear Cache
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #374151;">
+                <h4 style="color: #fff; margin-bottom: 15px;"><i class="fas fa-info-circle"></i> Database Status</h4>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                    <div style="background: #111827; padding: 15px; border-radius: 6px; border: 1px solid #374151;">
+                        <div style="color: #9ca3af; font-size: 14px;">Total Applications</div>
+                        <div style="font-size: 24px; font-weight: 600; color: #fff;" id="totalApplications">
+                            <span class="spinner"></span> Loading...
+                        </div>
+                    </div>
+                    <div style="background: #111827; padding: 15px; border-radius: 6px; border: 1px solid #374151;">
+                        <div style="color: #9ca3af; font-size: 14px;">Pending Reviews</div>
+                        <div style="font-size: 24px; font-weight: 600; color: #f59e0b;" id="pendingApplications">
+                            <span class="spinner"></span> Loading...
+                        </div>
+                    </div>
+                    <div style="background: #111827; padding: 15px; border-radius: 6px; border: 1px solid #374151;">
+                        <div style="color: #9ca3af; font-size: 14px;">Approved Loans</div>
+                        <div style="font-size: 24px; font-weight: 600; color: #10b981;" id="approvedApplications">
+                            <span class="spinner"></span> Loading...
+                        </div>
+                    </div>
+                    <div style="background: #111827; padding: 15px; border-radius: 6px; border: 1px solid #374151;">
+                        <div style="color: #9ca3af; font-size: 14px;">Database Size</div>
+                        <div style="font-size: 24px; font-weight: 600; color: #a78bfa;" id="dbSize">
+                            <span class="spinner"></span> Loading...
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Applications Table -->
+                <div id="applicationsTable" style="margin-top: 30px; display: none;">
+                    <h4 style="color: #fff; margin-bottom: 15px;"><i class="fas fa-table"></i> Recent Applications</h4>
+                    <div style="overflow-x: auto;">
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <thead>
+                                <tr style="background: #111827;">
+                                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid #374151;">ID</th>
+                                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid #374151;">Name</th>
+                                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid #374151;">Amount</th>
+                                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid #374151;">Status</th>
+                                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid #374151;">Date</th>
+                                </tr>
+                            </thead>
+                            <tbody id="applicationsBody">
+                                <!-- Data will be inserted here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
         </div>
     </section>
 
     <!-- What It Does -->
     <section class="container">
-        <br>
         <h2>What CREDGEN AI Does</h2>
         <div class="features-grid">
             <div class="feature">
@@ -128,11 +316,10 @@
                 <p>Automatically creates sanction letters and loan agreements once terms are accepted.</p>
             </div>
         </div>
-        <br>
     </section>
+
     <!-- Integration -->
     <section class="container">
-        <br>
         <h2>How to Integrate</h2>
         <p style="margin-bottom: 20px; color: #9ca3af;">Add our AI loan assistant to your website in 2 minutes with a single line of code.</p>
         
@@ -142,6 +329,7 @@
                 <p style="color: #9ca3af;">Add this code before the closing &lt;/body&gt; tag of your website.</p>
             </div>
         </div>
+        
         <div class="integration-code">
             <code>
                 &lt;!-- Embed CredGen AI Bot on your website --&gt;<br>
@@ -149,7 +337,6 @@
                 &lt;script src="https://credgen.com/chat.js"&gt;&lt;/script&gt;
             </code>
         </div>
-        
         
         <div class="integration-steps">
             <div class="step">
@@ -159,12 +346,12 @@
         </div>
         
         <div style="margin-top: 30px;">
-            <a href="#!" class="demo-btn" id="copyBtn">
+            <button class="demo-btn" id="copyBtn">
                 <i class="fas fa-copy"></i> Copy Embed Code
-            </a>
+            </button>
         </div>
-        <br>
     </section>
+
     <!-- CTA -->
     <section class="cta">
         <div class="container">
@@ -174,12 +361,16 @@
                 <a href="/widget.html" class="demo-btn" target="_blank" rel="noopener noreferrer">
                     <i class="fas fa-play-circle"></i> Try Demo
                 </a>
-                <a href="mailto:contact@credgen.ai" class="demo-btn" style="background: #333; border: 1px solid #444;">
+                <button class="demo-btn" onclick="showToast('Contact us at contact@credgen.ai', 'info')">
                     <i class="fas fa-envelope"></i> Contact Us
+                </button>
+                <a href="https://supabase.com/dashboard/project/keyzhoellnmxyegtsoft" class="demo-btn supabase-btn" target="_blank">
+                    <i class="fas fa-database"></i> Supabase Dashboard
                 </a>
             </div>
         </div>
     </section>
+
     <!-- Footer -->
     <footer>
         <div class="container">
@@ -187,15 +378,341 @@
                 <a href="/widget.html">Demo</a>
                 <a href="#features">Features</a>
                 <a href="#integration">Integration</a>
-                <a href="mailto:contact@credgen.ai">Contact</a>
+                <a href="#" onclick="showToast('Admin dashboard requires setup', 'info')">Admin Dashboard</a>
+                <a href="#" onclick="showToast('Contact us at contact@credgen.ai', 'info')">Contact</a>
+                <a href="#" onclick="testSupabaseConnection()">Database Status</a>
             </div>
             <p class="copyright">
                 &copy; 2025 CREDGEN AI. AI-powered loan assistant chatbot.
+                <br>
+                <span style="font-size: 12px; color: #6b7280; margin-top: 5px; display: block;">
+                    Powered by Supabase • Real-time Database • Cloud Storage
+                </span>
             </p>
         </div>
     </footer>
+
     <script>
+        // ============================================
+        // SUPABASE CONFIGURATION
+        // ============================================
+        // CredGen AI Supabase Configuration
+        const SUPABASE_URL = 'https://keyzhoellnmxyegtsoft.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtxdnpob2NsbG5ueHllcXRzb3RyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgwNjM5MTgsImV4cCI6MjA4MzYzOTkxOH0.9GL-HxsRqtRpSV6MkJZnKccb19jFxmAgHXag6sAjyGQ';
+        
+        // Initialize Supabase client
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        
+        // ============================================
+        // UTILITY FUNCTIONS
+        // ============================================
+        
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = 'toast';
+            
+            if (type === 'error') {
+                toast.classList.add('error');
+            } else if (type === 'warning') {
+                toast.style.background = '#f59e0b';
+            } else if (type === 'success') {
+                toast.style.background = '#10b981';
+            }
+            
+            toast.classList.add('show');
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+        
+        function openSupabaseDashboard() {
+            window.open('https://supabase.com/dashboard/project/keyzhoellnmxyegtsoft', '_blank');
+        }
+        
+        // ============================================
+        // SUPABASE FUNCTIONS
+        // ============================================
+        
+        async function testSupabaseConnection() {
+            const statusElement = document.getElementById('dbStatus');
+            statusElement.innerHTML = '<span class="spinner"></span> Testing connection...';
+            
+            try {
+                // Test connection by fetching from a table
+                const { data, error } = await supabase
+                    .from('applications')
+                    .select('count')
+                    .limit(1);
+                
+                if (error) {
+                    // If applications table doesn't exist, try to create it
+                    if (error.message.includes('relation "applications" does not exist')) {
+                        showToast('⚠️ Applications table not found. Click "Add Sample Data" to create it.', 'warning');
+                        statusElement.className = 'status-badge status-offline';
+                        statusElement.innerHTML = '<i class="fas fa-circle" style="font-size: 8px; margin-right: 5px;"></i> Table Missing';
+                        return;
+                    }
+                    throw error;
+                }
+                
+                statusElement.className = 'status-badge status-online';
+                statusElement.innerHTML = '<i class="fas fa-circle" style="font-size: 8px; margin-right: 5px;"></i> Supabase Connected';
+                showToast('✅ Successfully connected to Supabase', 'success');
+                
+                // Load statistics after successful connection
+                loadStatistics();
+                
+            } catch (error) {
+                console.error('Supabase connection error:', error);
+                statusElement.className = 'status-badge status-offline';
+                statusElement.innerHTML = '<i class="fas fa-circle" style="font-size: 8px; margin-right: 5px;"></i> Connection Failed';
+                showToast('❌ Failed to connect to Supabase: ' + error.message, 'error');
+            }
+        }
+        
+        async function loadStatistics() {
+            try {
+                // Get total applications
+                const { count: total, error: countError } = await supabase
+                    .from('applications')
+                    .select('*', { count: 'exact', head: true });
+                
+                if (countError) throw countError;
+                
+                // Get pending applications
+                const { count: pending, error: pendingError } = await supabase
+                    .from('applications')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('status', 'pending');
+                
+                if (pendingError) throw pendingError;
+                
+                // Get approved applications
+                const { count: approved, error: approvedError } = await supabase
+                    .from('applications')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('status', 'approved');
+                
+                if (approvedError) throw approvedError;
+                
+                // Update UI
+                document.getElementById('totalApplications').textContent = total || 0;
+                document.getElementById('pendingApplications').textContent = pending || 0;
+                document.getElementById('approvedApplications').textContent = approved || 0;
+                document.getElementById('dbSize').textContent = total ? `${total} records` : 'Empty';
+                
+                // Update data status
+                const dataStatus = document.getElementById('dataStatus');
+                dataStatus.className = 'status-badge status-online';
+                dataStatus.innerHTML = '<i class="fas fa-circle" style="font-size: 8px; margin-right: 5px;"></i> Data Loaded';
+                
+            } catch (error) {
+                console.error('Error loading statistics:', error);
+                document.getElementById('totalApplications').textContent = 'Error';
+                document.getElementById('pendingApplications').textContent = 'Error';
+                document.getElementById('approvedApplications').textContent = 'Error';
+                document.getElementById('dbSize').textContent = 'Error';
+                
+                showToast('Error loading statistics. Check database setup.', 'error');
+            }
+        }
+        
+        async function fetchApplications() {
+            try {
+                const { data: applications, error } = await supabase
+                    .from('applications')
+                    .select('*')
+                    .order('created_at', { ascending: false })
+                    .limit(10);
+                
+                if (error) {
+                    if (error.message.includes('relation "applications" does not exist')) {
+                        showToast('Applications table not found. Click "Add Sample Data" to create it.', 'warning');
+                        return;
+                    }
+                    throw error;
+                }
+                
+                // Display applications table
+                const tableBody = document.getElementById('applicationsBody');
+                const tableContainer = document.getElementById('applicationsTable');
+                
+                if (applications.length === 0) {
+                    tableBody.innerHTML = `
+                        <tr>
+                            <td colspan="5" style="padding: 20px; text-align: center; color: #9ca3af;">
+                                No applications found. Add sample data to get started.
+                            </td>
+                        </tr>
+                    `;
+                } else {
+                    tableBody.innerHTML = applications.map(app => `
+                        <tr style="border-bottom: 1px solid #374151;">
+                            <td style="padding: 12px;">${app.id || 'N/A'}</td>
+                            <td style="padding: 12px;">${app.full_name || 'Unknown'}</td>
+                            <td style="padding: 12px;">$${app.loan_amount || '0'}</td>
+                            <td style="padding: 12px;">
+                                <span style="padding: 4px 8px; border-radius: 4px; font-size: 12px; 
+                                    background: ${app.status === 'approved' ? '#10b98133' : 
+                                               app.status === 'pending' ? '#f59e0b33' : '#ef444433'}; 
+                                    color: ${app.status === 'approved' ? '#10b981' : 
+                                            app.status === 'pending' ? '#f59e0b' : '#ef4444'};">
+                                    ${app.status || 'unknown'}
+                                </span>
+                            </td>
+                            <td style="padding: 12px; color: #9ca3af; font-size: 14px;">
+                                ${app.created_at ? new Date(app.created_at).toLocaleDateString() : 'N/A'}
+                            </td>
+                        </tr>
+                    `).join('');
+                }
+                
+                tableContainer.style.display = 'block';
+                showToast(`Loaded ${applications.length} applications`, 'success');
+                
+            } catch (error) {
+                console.error('Error fetching applications:', error);
+                showToast('Error fetching applications: ' + error.message, 'error');
+            }
+        }
+        
+        async function createSampleData() {
+            if (!confirm('This will add sample loan applications to your database. Continue?')) {
+                return;
+            }
+            
+            const sampleData = [
+                {
+                    full_name: 'John Smith',
+                    email: 'john.smith@email.com',
+                    phone: '+1-555-0123',
+                    loan_amount: 15000,
+                    loan_purpose: 'Home Renovation',
+                    employment_status: 'employed',
+                    annual_income: 75000,
+                    credit_score: 720,
+                    status: 'pending',
+                    created_at: new Date().toISOString()
+                },
+                {
+                    full_name: 'Maria Garcia',
+                    email: 'maria.garcia@email.com',
+                    phone: '+1-555-0124',
+                    loan_amount: 25000,
+                    loan_purpose: 'Business Expansion',
+                    employment_status: 'self-employed',
+                    annual_income: 95000,
+                    credit_score: 680,
+                    status: 'approved',
+                    created_at: new Date(Date.now() - 86400000).toISOString() // Yesterday
+                },
+                {
+                    full_name: 'David Chen',
+                    email: 'david.chen@email.com',
+                    phone: '+1-555-0125',
+                    loan_amount: 10000,
+                    loan_purpose: 'Debt Consolidation',
+                    employment_status: 'employed',
+                    annual_income: 65000,
+                    credit_score: 710,
+                    status: 'pending',
+                    created_at: new Date(Date.now() - 172800000).toISOString() // 2 days ago
+                }
+            ];
+            
+            try {
+                const { data, error } = await supabase
+                    .from('applications')
+                    .insert(sampleData);
+                
+                if (error) {
+                    // If table doesn't exist, try to create it first
+                    if (error.message.includes('relation "applications" does not exist')) {
+                        showToast('Creating applications table first...', 'info');
+                        
+                        // In a real scenario, you'd need to create the table via API
+                        // For now, show instructions
+                        showToast('Please create the applications table in Supabase first.', 'warning');
+                        openSupabaseDashboard();
+                        return;
+                    }
+                    throw error;
+                }
+                
+                showToast('✅ Sample data added successfully!', 'success');
+                loadStatistics(); // Refresh statistics
+                fetchApplications(); // Refresh table
+                
+            } catch (error) {
+                console.error('Error creating sample data:', error);
+                showToast('Error creating sample data: ' + error.message, 'error');
+            }
+        }
+        
+        function showAnalytics() {
+            showToast('Analytics dashboard coming soon!', 'info');
+            // In a real implementation, this would show charts/graphs
+        }
+        
+        async function exportData() {
+            try {
+                const { data: applications, error } = await supabase
+                    .from('applications')
+                    .select('*');
+                
+                if (error) {
+                    if (error.message.includes('relation "applications" does not exist')) {
+                        showToast('No applications table found.', 'warning');
+                        return;
+                    }
+                    throw error;
+                }
+                
+                if (!applications || applications.length === 0) {
+                    showToast('No data to export.', 'warning');
+                    return;
+                }
+                
+                // Convert to CSV
+                const headers = ['ID', 'Name', 'Email', 'Phone', 'Loan Amount', 'Purpose', 'Status', 'Income', 'Credit Score', 'Date'];
+                const csvContent = applications.map(app => 
+                    `${app.id || ''},"${app.full_name || ''}","${app.email || ''}","${app.phone || ''}",${app.loan_amount || 0},"${app.loan_purpose || ''}","${app.status || ''}",${app.annual_income || 0},${app.credit_score || 0},"${app.created_at || ''}"`
+                ).join('\n');
+                
+                const csv = headers.join(',') + '\n' + csvContent;
+                
+                // Create download link
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `credgen-applications-${new Date().toISOString().split('T')[0]}.csv`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+                
+                showToast('✅ Data exported successfully!', 'success');
+                
+            } catch (error) {
+                console.error('Error exporting data:', error);
+                showToast('Error exporting data: ' + error.message, 'error');
+            }
+        }
+        
+        function clearLocalData() {
+            localStorage.clear();
+            showToast('Local cache cleared!', 'success');
+        }
+        
+        // ============================================
+        // PAGE INITIALIZATION
+        // ============================================
+        
         document.addEventListener('DOMContentLoaded', function() {
+            // Copy embed code functionality
             const copyBtn = document.getElementById('copyBtn');
             if (copyBtn) {
                 copyBtn.addEventListener('click', function(e) {
@@ -213,9 +730,15 @@
                             copyBtn.innerHTML = originalText;
                             copyBtn.style.background = '#4f46e5';
                         }, 2000);
+                        showToast('Embed code copied to clipboard!', 'success');
                     });
                 });
             }
+            
+            // Test Supabase connection on page load
+            setTimeout(() => {
+                testSupabaseConnection();
+            }, 1000);
         });
     </script>
 </body>
